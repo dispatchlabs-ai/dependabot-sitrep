@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="oklch(97.5% 0.006 85)">
+  <meta name="description" content="A local dashboard of repository Dependabot alerts using GitHub CLI.">
+  <title>Repositories · Dependabot Sitrep</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-repo" viewBox="0 0 24 24"><path d="M5 4h13a1 1 0 0 1 1 1v15H6a3 3 0 0 1-3-3V6a2 2 0 0 1 2-2Z"/><path d="M3 17a3 3 0 0 1 3-3h13M7 8h7M7 20v-3"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4.5 7.8-8 9-3.5-1.2-8-5-8-9V6l8-3Z"/><path d="m8.5 11.5 2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-org" viewBox="0 0 24 24"><path d="M5 21V4h11v17M16 10h4v11M2 21h20M8 8h5M8 12h5M8 16h5"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 6h18M6 12h12M9 18h6"/><circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7m0-7L10 14M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3v1"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="i-package" viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7l9-5Zm0 10v10M3 7l9 5 9-5M7.5 4.5l9 5v5"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 4H4v16h5m5-13 5 5-5 5m-5-5h10"/></symbol>
+  </svg>
+  <a class="skip-link" href="#main-content">Skip to dashboard</a>
+  <div class="app-shell" data-od-id="sitrep-app">
+    <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation" data-od-id="sidebar">
+      <button class="icon-button mobile-nav-close" data-action="close-navigation" aria-label="Close navigation" data-od-id="close-mobile-navigation"><svg><use href="#i-close"/></svg></button>
+      <a class="brand" href="#repositories" data-view="repositories" aria-label="Dependabot Sitrep repositories" data-od-id="brand">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M20 3 34 9v11c0 8-9 15-14 17C15 35 6 28 6 20V9L20 3Z" fill="currentColor"/><path d="m15 13-5 7 5 7m10-14 5 7-5 7m-3-15-4 16" stroke="white" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="brand-copy"><strong>Dependabot</strong><span>SITREP</span></span>
+      </a>
+      <nav class="nav-section" aria-label="Workspace">
+        <span class="section-label">WORKSPACE</span>
+        <button class="nav-item active" data-view="repositories" aria-current="page" data-od-id="nav-repositories"><svg><use href="#i-repo"/></svg><span>Repositories</span><span class="nav-count" id="nav-repo-count">0</span></button>
+        <button class="nav-item" data-view="coverage" data-od-id="nav-coverage"><svg><use href="#i-shield"/></svg><span>Coverage</span></button>
+      </nav>
+      <nav class="nav-section" id="owner-navigation" aria-label="Filter by owner"><span class="section-label">OWNERS</span></nav>
+      <div class="sidebar-bottom">
+        <button class="identity" id="identity-button" data-od-id="connected-identity" aria-label="Open GitHub CLI connection details"><span class="identity-avatar">GH</span><span class="identity-copy"><strong>GitHub CLI</strong><span id="identity-status">Connected via gh</span></span><svg><use href="#i-down"/></svg></button>
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar" data-od-id="topbar">
+        <button class="icon-button mobile-menu" id="menu-button" aria-label="Toggle sidebar" aria-expanded="true" aria-controls="sidebar" data-od-id="mobile-menu"><svg><use href="#i-menu"/></svg></button>
+        <div class="breadcrumb"><span>Workspace</span><svg><use href="#i-chevron"/></svg><strong id="breadcrumb-current">Repositories</strong></div>
+        <div class="topbar-right"><span class="sample-badge" data-od-id="sample-data-badge" hidden><span></span>Demo data</span></div>
+      </header>
+      <main class="main-content" id="main-content" tabindex="-1" data-od-id="dashboard">
+        <section class="page-heading" data-od-id="page-heading"><div><h1 id="page-title" data-od-id="page-title">Repositories</h1></div><div class="heading-actions"><span class="scan-time" id="scan-time">Connecting…</span><button class="btn btn-primary" id="refresh-button" data-od-id="refresh-repositories"><svg><use href="#i-refresh"/></svg><span>Refresh repos</span></button></div></section>
+        <section id="operation-notice" class="operation-notice" role="alert" hidden><p id="operation-message"></p><button class="btn btn-secondary btn-small" id="retry-button">Retry connection</button></section><section id="login-state" class="login-state" hidden tabindex="-1" data-od-id="gh-setup-error"><div class="empty-icon"><svg><use href="#i-terminal"/></svg></div><span class="eyebrow">GITHUB CLI CONNECTION REQUIRED</span><h2>Connect your GitHub CLI.</h2><p id="login-error" class="form-error" hidden></p><p>Sitrep needs an authenticated GitHub CLI session to read your repositories. Sign in on your machine, then check the connection.</p><div class="terminal-block"><code>gh auth login</code><button class="icon-button" data-copy="gh auth login" aria-label="Copy gh auth login"><svg><use href="#i-copy"/></svg></button></div><p class="permission-note">Run this command in your terminal, then check the connection below.</p><button class="btn btn-primary" id="reconnect-button" data-od-id="check-gh-connection"><svg><use href="#i-refresh"/></svg>Check connection</button><details><summary>GitHub CLI not installed?</summary><p>Install <code>gh</code> from <a href="https://cli.github.com/" target="_blank" rel="noopener noreferrer">cli.github.com</a>, then run <code>gh auth login</code>. Repository visibility and alert access depend on your account and token permissions.</p></details></section>
+        <div id="connected-content">
+          <section class="metrics-grid" id="metrics-grid" aria-label="Repository summary" data-od-id="summary-metrics"></section>
+          <section class="notice" id="access-notice" data-od-id="partial-access-notice"><span class="notice-icon"><svg><use href="#i-info"/></svg></span><div class="notice-content"><strong>Limited alert access</strong><p id="access-notice-copy">Some repositories have limited alert access. Unknown counts are never treated as zero.</p></div><button class="notice-action" id="review-access" data-od-id="review-access">Review access<svg><use href="#i-arrow"/></svg></button></section>
+          <section class="scan-notice" id="scan-notice" hidden aria-live="polite" data-od-id="scan-progress"><div><svg class="spinning"><use href="#i-refresh"/></svg><strong id="scan-message">Discovering accessible repositories…</strong><span id="scan-count">0 / 12</span></div><div class="scan-track"><div class="scan-fill" id="scan-fill"></div></div><p>Counts appear as repositories finish scanning. Missing counts are excluded from totals.</p></section>
+          <section class="coverage-view" id="coverage-view" hidden data-od-id="coverage-view"></section>
+          <section class="repo-section" id="repo-section" data-od-id="repository-list">
+            <div class="section-heading"><div><h2 id="table-title">Your repositories</h2><span class="result-count" id="section-count">0</span></div></div>
+            <div class="toolbar" data-od-id="repository-toolbar"><div class="search-wrap"><svg><use href="#i-search"/></svg><input id="repo-search" type="search" autocomplete="off" placeholder="Find a repository…" aria-label="Search repositories" data-od-id="search-repositories"><kbd class="keycap">/</kbd></div><div class="toolbar-controls"><label class="select-wrap"><span class="sr-only">Organization</span><svg><use href="#i-org"/></svg><select id="org-filter" aria-label="Filter by organization" data-od-id="filter-organization"><option value="all">All owners</option></select></label><label class="select-wrap"><span class="sr-only">Alert status</span><select id="status-filter" aria-label="Filter by alert status" data-od-id="filter-status"><option value="all">All statuses</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="unknown">Unknown</option></select></label><button class="btn btn-secondary filter-button" id="more-filters" aria-expanded="false" aria-controls="filter-panel" data-od-id="more-filters"><svg><use href="#i-filter"/></svg><span>Filters</span><span id="extra-filter-count" hidden></span></button></div></div>
+            <div class="filter-panel" id="filter-panel" hidden data-od-id="advanced-filters"><div class="filter-grid"><label class="mobile-filter">Owner<select id="mobile-org-filter" aria-label="Filter by owner"><option value="all">All owners</option></select></label><label class="mobile-filter">Alert status<select id="mobile-status-filter" aria-label="Filter by alert status"><option value="all">All statuses</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="unknown">Unknown</option></select></label><label>Severity<select id="severity-filter" data-od-id="filter-severity"><option value="all">Any severity</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Open alerts<select id="alerts-filter" data-od-id="filter-has-alerts"><option value="all">Any alert count</option><option value="yes">Has open alerts</option><option value="no">Zero open alerts (verified)</option><option value="unreadable">Counts unavailable</option></select></label><label>Archive status<select id="archive-filter" data-od-id="filter-archived"><option value="all">Include archived</option><option value="active">Active only</option><option value="archived">Archived only</option></select></label><label>Sort repositories<select id="sort-filter" data-od-id="sort-repositories"><option value="critical">Critical vulnerability count</option><option value="high">High vulnerability count</option><option value="medium">Medium vulnerability count</option><option value="low">Low vulnerability count</option><option value="alerts">Total vulnerability count</option><option value="name">Repository name</option><option value="language">Language</option><option value="status">Alert status</option></select></label><label>Sort direction<select id="sort-direction"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label></div><label class="check-label"><input type="checkbox" id="attention-filter" data-od-id="filter-attention">Only repositories needing attention</label><label class="check-label"><input type="checkbox" id="can-enable-filter">Only repositories I can enable</label></div>
+            <div class="active-filters" id="active-filters" hidden></div>
+            <div class="repo-table-wrap"><table class="repo-table" aria-label="Accessible repositories and Dependabot alert status" data-od-id="repositories-table"><thead><tr><th scope="col"><button class="table-sort" data-sort="name"><span>Repository</span><span class="sort-indicator" aria-hidden="true">↕</span></button></th><th scope="col" class="language-cell"><button class="table-sort" data-sort="language"><span>Language</span><span class="sort-indicator" aria-hidden="true">↕</span></button></th><th scope="col"><button class="table-sort" data-sort="alerts"><span>Dependabot alerts</span><span class="sort-indicator" aria-hidden="true">↕</span></button></th><th scope="col" class="severity-column" aria-sort="descending"><button class="table-sort" data-sort="critical"><span><span class="severity-dot critical"></span>Critical</span><span class="sort-indicator" aria-hidden="true">↓</span></button></th><th scope="col" class="severity-column"><button class="table-sort" data-sort="high"><span><span class="severity-dot high"></span>High</span><span class="sort-indicator" aria-hidden="true">↕</span></button></th><th scope="col" class="severity-column"><button class="table-sort" data-sort="medium"><span><span class="severity-dot medium"></span>Medium</span><span class="sort-indicator" aria-hidden="true">↕</span></button></th><th scope="col" class="severity-column"><button class="table-sort" data-sort="low"><span><span class="severity-dot low"></span>Low</span><span class="sort-indicator" aria-hidden="true">↕</span></button></th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="repo-rows"></tbody></table><div class="empty-state" id="no-results" hidden><div class="empty-icon"><svg><use href="#i-search"/></svg></div><h3>No repositories match.</h3><p>Try a different search or clear your filters.</p><button class="btn btn-secondary" data-action="clear-filters" data-od-id="clear-empty-filters">Clear filters</button></div></div>
+            <footer class="table-footer"><span id="result-summary" aria-live="polite">Waiting for repository scan</span><span class="footer-key"><span class="dot"></span>— means unavailable, never zero</span></footer>
+          </section>
+          <footer class="page-footer" data-od-id="dashboard-footer" hidden><span id="footer-version"></span></footer>
+        </div>
+      </main>
+    </div>
+  </div>
+  <dialog class="drawer" id="repo-drawer" aria-labelledby="drawer-title" data-od-id="repository-detail-drawer"></dialog>
+  <dialog class="modal" id="enable-modal" aria-labelledby="enable-title" data-od-id="enable-confirmation"></dialog>
+  <dialog class="modal" id="connection-modal" aria-labelledby="connection-title" data-od-id="gh-connection-dialog"></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <noscript><div class="noscript-note">Enable JavaScript to use this dashboard.</div></noscript>
+</body>
+</html>
