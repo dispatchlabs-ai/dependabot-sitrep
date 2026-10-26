@@ -1,4 +1,6 @@
 /* Browser client for the local Node server. Credentials remain managed by gh. */
+import { normalizeOwnerScope, scopeRepositories } from './owner-scope.js';
+
 (() => {
   'use strict';
   const severities = ['critical', 'high', 'medium', 'low'];
@@ -10,11 +12,12 @@
   const state = { view: 'repositories', sidebarCollapsed: false, filters: { ...defaults }, snapshot: null, connected: false, scanning: false, activeRepo: null, pendingEnable: null, enabling: false, requesting: false, error: null };
   const mobileQuery = window.matchMedia('(max-width: 700px)');
   let mobileNavigationOpen = false;
-  let repositories = [], csrfToken, snapshotKey = '', ownerKey = '', rowsKey = '', drawerKey = '', pollTimer, toastTimer, loading = false;
+  let repositories = [], csrfToken, snapshotKey = '', ownerKey = '', rowsKey = '', drawerKey = '', pollTimer, toastTimer, loading = false, savedOwnerScope = null, scopeAccount = '';
   try {
     const saved = JSON.parse(localStorage.getItem('sitrep-preferences') || 'null');
     if (['repositories', 'coverage'].includes(saved?.view)) state.view = saved.view;
     state.sidebarCollapsed = saved?.sidebarCollapsed === true;
+    savedOwnerScope = saved?.ownerScope;
   } catch { /* Storage is optional. */ }
   const total = repo => repo.countsReadable ? repo.counts.total : null;
   const status = repo => repo.enabled === true ? 'enabled' : repo.enabled === false ? 'disabled' : 'unknown';
@@ -30,8 +33,24 @@
     return '';
   }
   function ownerScope() {
-    const org = state.filters.org;
-    return repositories.filter(repo => org === 'all' || (org === 'organizations' ? repo.ownerType === 'Organization' : org === 'personal' ? repo.owner === login() : repo.owner === org));
+    return scopeRepositories(repositories, state.filters.org, login());
+  }
+  function scopeLabel() {
+    const scope = state.filters.org;
+    if (!Array.isArray(scope)) return ({ all: 'All owners', organizations: 'All organizations', personal: 'Personal repositories' })[scope];
+    if (!scope.length) return 'No owners selected';
+    if (scope.length === 1) return scope[0];
+    return `${scope.length} ${scope.every(owner => organizations().includes(owner)) ? 'organizations' : 'owners'} selected`;
+  }
+  function closeOwnerPicker() {
+    $('#owner-picker').open = false;
+    $('#owner-picker summary').focus();
+  }
+  function searchOwners() {
+    const query = $('#owner-search').value.trim().toLowerCase();
+    $$('.owner-option').forEach(option => { option.hidden = !option.querySelector('input').dataset.owner.toLowerCase().includes(query); });
+    $$('.owner-option-group').forEach(group => { group.hidden = ![...group.querySelectorAll('.owner-option')].some(option => !option.hidden); });
+    $('#owner-no-matches').hidden = $$('.owner-option').some(option => !option.hidden);
   }
   function summarize(repos) {
     const counts = Object.fromEntries(severities.map(severity => [severity, repos.reduce((sum, repo) => sum + (repo.countsReadable ? repo.counts[severity] || 0 : 0), 0)]));
@@ -69,10 +88,10 @@
   function coverageBar(stats) { return `<div class="coverage-track" role="img" aria-label="${stats.enabled} enabled, ${stats.disabled} disabled, ${stats.unknown} unknown, of ${stats.total} repositories">${['enabled', 'disabled', 'unknown'].map(value => stats[value] ? `<span class="coverage-segment ${value}" data-weight="${stats[value]}"></span>` : '').join('')}</div>`; }
   function renderMetrics() {
     const stats = summarize(ownerScope());
-    const scopeLabel = state.filters.org === 'all' ? `${organizations().length} organizations · ${repositories.filter(repo => repo.owner === login()).length} personal repos` : state.filters.org === 'personal' ? 'Your personal repositories' : 'Within the selected owner scope';
+    const scopeNote = state.filters.org === 'all' ? `${organizations().length} organizations · ${repositories.filter(repo => repo.owner === login()).length} personal repos` : scopeLabel();
     const partial = state.scanning || ['paused', 'error'].includes(state.snapshot?.scan.status);
     $('#metrics-grid').innerHTML = `
-      <article class="metric-card" data-od-id="metric-repositories"><div class="metric-label">Visible repositories${icon('repo')}</div><div class="metric-value">${stats.total.toString().padStart(2, '0')}</div><div class="metric-note">${scopeLabel}</div></article>
+      <article class="metric-card" data-od-id="metric-repositories"><div class="metric-label">Visible repositories${icon('repo')}</div><div class="metric-value">${stats.total.toString().padStart(2, '0')}</div><div class="metric-note">${esc(scopeNote)}</div></article>
       <article class="metric-card" data-od-id="metric-open-alerts"><div class="metric-label">Open alerts <span class="metric-tag">${partial ? 'PARTIAL' : 'READABLE'}</span></div><div class="metric-inline"><div class="metric-value">${stats.readable ? stats.alerts : '—'}</div><span class="metric-side-note">across ${stats.readable} readable repos</span></div><div class="severity-legend">${severities.map(severity => `<span class="severity-item"><span class="severity-dot ${severity}"></span><strong>${stats.readable ? stats.counts[severity] : '—'}</strong><span>${severity === 'medium' ? 'Med' : severity[0].toUpperCase() + severity.slice(1)}</span></span>`).join('')}</div><div class="metric-note">${stats.total - stats.readable} repos excluded from alert totals</div></article>
       <article class="metric-card" data-od-id="metric-coverage"><div class="metric-label">Alerts enabled${icon('shield')}</div><div class="metric-inline"><div class="metric-value">${stats.enabled}<span class="metric-denominator">/ ${stats.total}</span></div><span class="metric-side-note">repositories</span></div>${coverageBar(stats)}<div class="metric-note">${stats.disabled} disabled · ${stats.unknown} unknown</div></article>
       <article class="metric-card attention-metric" data-od-id="metric-attention"><div class="metric-label">Needs attention${icon('alert')}</div><div class="metric-value">${stats.attention.toString().padStart(2, '0')}<span class="metric-unit">repos</span></div><button class="metric-link" id="show-attention">Review active repositories ${icon('arrow')}</button></article>`;
@@ -101,7 +120,7 @@
     $('#no-results p').textContent = !repositories.length ? 'Repository visibility depends on your active GitHub CLI credentials, organization access, and SSO authorization.' : 'Try a different search or clear your filters.';
     $('#section-count').textContent = repos.length;
     $('#result-summary').textContent = `Showing ${repos.length} of ${ownerScope().length} repositories in ${state.filters.org === 'all' ? 'all owners' : 'this owner scope'} · ${repositories.length} discovered overall`;
-    const f = state.filters, labels = { org: f.org === 'personal' ? 'Personal repos' : f.org === 'organizations' ? 'All organizations' : f.org, query: `Search: ${f.query}`, status: `Status: ${f.status}`, severity: `Severity: ${f.severity}`, hasAlerts: f.hasAlerts === 'yes' ? 'Has open alerts' : f.hasAlerts === 'no' ? 'Verified zero alerts' : 'Counts unavailable', archived: f.archived === 'active' ? 'Active only' : 'Archived only', attention: 'Needs attention', canEnable: 'Can enable' };
+    const f = state.filters, labels = { org: scopeLabel(), query: `Search: ${f.query}`, status: `Status: ${f.status}`, severity: `Severity: ${f.severity}`, hasAlerts: f.hasAlerts === 'yes' ? 'Has open alerts' : f.hasAlerts === 'no' ? 'Verified zero alerts' : 'Counts unavailable', archived: f.archived === 'active' ? 'Active only' : 'Archived only', attention: 'Needs attention', canEnable: 'Can enable' };
     const keys = Object.keys(f).filter(k => !['sort', 'sortDirection'].includes(k) && f[k] !== defaults[k]);
     $('#active-filters').hidden = !keys.length;
     $('#active-filters').innerHTML = keys.map(k => `<button class="filter-chip" data-clear="${k}" aria-label="Remove ${esc(labels[k])} filter">${esc(labels[k])}${icon('close')}</button>`).join('') + (keys.length ? '<button class="text-button" data-action="clear-filters">Clear all</button>' : '');
@@ -109,11 +128,21 @@
     $('#extra-filter-count').hidden = !extra; $('#extra-filter-count').textContent = extra;
   }
   function renderOwners() {
-    const key = JSON.stringify([owners(), repositories.map(repo => repo.owner), login()]);
+    const selected = Array.isArray(state.filters.org) ? state.filters.org : [];
+    const availableOwners = [...new Set([...owners(), ...selected])].sort((a, b) => a.localeCompare(b));
+    const key = JSON.stringify([availableOwners, repositories.map(repo => [repo.owner, repo.ownerType]), login()]);
     if (key === ownerKey) return; ownerKey = key;
     const count = owner => repositories.filter(repo => repo.owner === owner).length;
-    const options = `<option value="all">All owners</option><option value="organizations">All organizations</option>${owners().map(owner => `<option value="${esc(owner)}">${esc(owner)}</option>`).join('')}<option value="personal">Personal repos</option>`;
-    $('#org-filter').innerHTML = options; $('#mobile-org-filter').innerHTML = options;
+    const orgs = organizations();
+    const groups = [
+      ['Organizations', availableOwners.filter(owner => orgs.includes(owner))],
+      ['Personal repositories', availableOwners.filter(owner => owner === login())],
+      ['Other owners', availableOwners.filter(owner => !orgs.includes(owner) && owner !== login())],
+    ];
+    const focusedOwner = document.activeElement?.dataset.owner;
+    $('#owner-options').innerHTML = groups.filter(([, items]) => items.length).map(([label, items]) => `<div class="owner-option-group"><p class="owner-group-label">${label}</p>${items.map(owner => `<label class="owner-option"><input type="checkbox" data-owner="${esc(owner)}"><span class="owner-option-name">${esc(owner)}</span><span class="owner-option-count">${count(owner)}</span></label>`).join('')}</div>`).join('');
+    if (focusedOwner) $$('#owner-options input').find(input => input.dataset.owner === focusedOwner)?.focus({ preventScroll: true });
+    searchOwners();
     $('#owner-navigation').innerHTML = `<span class="section-label">OWNERS <span>${owners().length}</span></span><button class="nav-item org-item" data-org="all">${icon('org')}<span>All owners</span><span class="nav-count">${repositories.length}</span></button>${owners().filter(owner => owner !== login()).map(owner => `<button class="nav-item org-item" data-org="${esc(owner)}"><span class="org-avatar">${esc(owner[0].toUpperCase())}</span><span>${esc(owner)}</span><span class="nav-count">${count(owner)}</span></button>`).join('')}<div class="personal-divider"></div><button class="nav-item org-item" data-org="personal">${icon('user')}<span>Personal repositories</span><span class="nav-count">${count(login())}</span></button>`;
     $('#nav-repo-count').textContent = repositories.length;
   }
@@ -125,10 +154,22 @@
     }).join('')}</div><div class="coverage-legend"><span><i></i>Enabled</span><span class="disabled"><i></i>Disabled</span><span class="unknown"><i></i>Unknown</span></div><div class="coverage-explainer"><div><h3>Alert permissions</h3><p>Repository settings confirm whether alerts are enabled. Reading alert details requires separate permission. Unavailable settings remain unknown; missing alert counts are excluded from totals.</p></div><div><h3>Repository access</h3><p>Organization SSO and token restrictions can limit visible repositories. Archived repositories remain in coverage totals.</p></div></div>`;
   }
   function syncControls() {
-    const ids = { org: ['org-filter', 'mobile-org-filter'], query: ['repo-search'], status: ['status-filter', 'mobile-status-filter'], severity: ['severity-filter'], hasAlerts: ['alerts-filter'], archived: ['archive-filter'], sort: ['sort-filter'], sortDirection: ['sort-direction'] };
+    const ids = { query: ['repo-search'], status: ['status-filter', 'mobile-status-filter'], severity: ['severity-filter'], hasAlerts: ['alerts-filter'], archived: ['archive-filter'], sort: ['sort-filter'], sortDirection: ['sort-direction'] };
     Object.entries(ids).forEach(([key, items]) => items.forEach(id => { if ($(`#${id}`).value !== state.filters[key]) $(`#${id}`).value = state.filters[key]; }));
     $('#attention-filter').checked = state.filters.attention; $('#can-enable-filter').checked = state.filters.canEnable;
-    $$('.org-item').forEach(item => { item.classList.toggle('active', item.dataset.org === state.filters.org); item.setAttribute('aria-pressed', String(item.dataset.org === state.filters.org)); });
+    const selected = new Set(ownerScope().map(repo => repo.owner));
+    if (Array.isArray(state.filters.org)) state.filters.org.forEach(owner => selected.add(owner));
+    $$('#owner-options input').forEach(input => { input.checked = selected.has(input.dataset.owner); });
+    $('#owner-picker-label').textContent = scopeLabel();
+    $('#owner-picker summary').setAttribute('aria-label', `Choose organizations to review: ${scopeLabel()}`);
+    $('#owner-picker summary').title = Array.isArray(state.filters.org) ? state.filters.org.join(', ') || 'No owners selected' : scopeLabel();
+    $('#scope-summary').textContent = `${ownerScope().length} of ${repositories.length} repositories in review`;
+    $('#owner-selection-summary').textContent = `${selected.size} owners selected`;
+    $$('.org-item').forEach(item => {
+      const scope = state.filters.org;
+      const active = Array.isArray(scope) ? (item.dataset.org === 'personal' ? selected.has(login()) : selected.has(item.dataset.org)) : item.dataset.org === scope;
+      item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active));
+    });
     $$('[data-sort]').forEach(button => {
       const active = button.dataset.sort === state.filters.sort;
       if (active) button.closest('th').setAttribute('aria-sort', state.filters.sortDirection === 'asc' ? 'ascending' : 'descending');
@@ -170,7 +211,8 @@
     savePreferences();
   }
   function savePreferences() {
-    try { localStorage.setItem('sitrep-preferences', JSON.stringify({ view: state.view, sidebarCollapsed: state.sidebarCollapsed })); } catch { /* Storage is optional. */ }
+    if (scopeAccount) savedOwnerScope = { account: scopeAccount, value: state.filters.org };
+    try { localStorage.setItem('sitrep-preferences', JSON.stringify({ view: state.view, sidebarCollapsed: state.sidebarCollapsed, ownerScope: savedOwnerScope })); } catch { /* Storage is optional. */ }
   }
   function syncSidebar() {
     const mobile = mobileQuery.matches;
@@ -240,6 +282,11 @@
     if (snapshot.csrfToken) csrfToken = snapshot.csrfToken;
     const nextKey = JSON.stringify(snapshot, (key, value) => key === 'csrfToken' ? undefined : value);
     if (nextKey === snapshotKey && !state.error) { renderStatus(); return; }
+    const account = snapshot.session.login ? JSON.stringify([snapshot.demo, snapshot.session.host, snapshot.session.login]) : '';
+    if (account !== scopeAccount) {
+      state.filters.org = account && savedOwnerScope?.account === account ? normalizeOwnerScope(savedOwnerScope.value) : 'all';
+      scopeAccount = account;
+    }
     snapshotKey = nextKey; state.snapshot = snapshot; state.connected = Boolean(snapshot.session.connected); state.scanning = snapshot.scan.status === 'running'; state.error = null;
     repositories = snapshot.repositories.map(repo => ({ ...repo, enabled: repo.alertsEnabled, admin: repo.permission === 'ADMIN', countsReadable: repo.counts !== null && repo.scanState === 'complete' })); render();
   }
@@ -268,12 +315,12 @@
       render();
     }
     else if (target.dataset.view) { event.preventDefault(); setView(target.dataset.view); }
-    else if (target.dataset.org) { state.filters.org = target.dataset.org; state.view = 'repositories'; closeNavigation(); render(); }
+    else if (target.dataset.org) { state.filters.org = ['all', 'personal'].includes(target.dataset.org) ? target.dataset.org : [target.dataset.org]; state.view = 'repositories'; closeNavigation(); render(); }
     else if (target.dataset.open) openRepo(target.dataset.open);
     else if (target.dataset.enable) openEnable(target.dataset.enable);
     else if (target.dataset.close) $(`#${target.dataset.close}`).close();
     else if (target.dataset.clear) { state.filters[target.dataset.clear] = defaults[target.dataset.clear]; render(); }
-    else if (target.dataset.ownerReview) { state.filters = { ...defaults, org: target.dataset.ownerReview }; setView('repositories'); }
+    else if (target.dataset.ownerReview) { state.filters = { ...defaults, org: [target.dataset.ownerReview] }; setView('repositories'); }
     else if (target.dataset.action === 'clear-filters') { state.filters = { ...defaults }; render(); }
     else if (target.dataset.action === 'access-help' || target.id === 'review-access') accessHelp();
     else if (target.dataset.action === 'close-navigation') closeNavigation();
@@ -285,10 +332,12 @@
     else if (target.id === 'confirm-enable') await confirmEnable();
     else if (target.id === 'menu-button') toggleNavigation();
     else if (target.id === 'more-filters') { const open = $('#filter-panel').hidden; $('#filter-panel').hidden = !open; target.setAttribute('aria-expanded', String(open)); }
+    else if (target.dataset.ownerScope) { state.filters.org = target.dataset.ownerScope === 'none' ? [] : target.dataset.ownerScope; render(); }
+    else if (target.id === 'owner-picker-done') closeOwnerPicker();
     else if (target.dataset.repo) openRepo(target.dataset.repo);
   });
   document.addEventListener('change', event => {
-    const map = { 'org-filter': 'org', 'mobile-org-filter': 'org', 'status-filter': 'status', 'mobile-status-filter': 'status', 'severity-filter': 'severity', 'alerts-filter': 'hasAlerts', 'archive-filter': 'archived', 'sort-filter': 'sort', 'sort-direction': 'sortDirection' };
+    const map = { 'status-filter': 'status', 'mobile-status-filter': 'status', 'severity-filter': 'severity', 'alerts-filter': 'hasAlerts', 'archive-filter': 'archived', 'sort-filter': 'sort', 'sort-direction': 'sortDirection' };
     if (map[event.target.id]) {
       state.filters[map[event.target.id]] = event.target.value;
       if (event.target.id === 'sort-filter') state.filters.sortDirection = ['name', 'language', 'status'].includes(event.target.value) ? 'asc' : 'desc';
@@ -296,12 +345,20 @@
     }
     if (event.target.id === 'attention-filter') { state.filters.attention = event.target.checked; render(); }
     if (event.target.id === 'can-enable-filter') { state.filters.canEnable = event.target.checked; render(); }
+    if (event.target.dataset.owner) {
+      const selected = new Set(Array.isArray(state.filters.org) ? state.filters.org : ownerScope().map(repo => repo.owner));
+      if (event.target.checked) selected.add(event.target.dataset.owner); else selected.delete(event.target.dataset.owner);
+      state.filters.org = [...selected]; render();
+    }
     if (event.target.id === 'enable-ack') $('#confirm-enable').disabled = !event.target.checked || !eligible(repositories.find(repo => repo.id === state.pendingEnable));
   });
   $('#repo-search').addEventListener('input', event => { state.filters.query = event.target.value; renderRows(); }); $('#sidebar-scrim').addEventListener('click', closeNavigation);
+  $('#owner-search').addEventListener('input', searchOwners);
+  document.addEventListener('click', event => { if (!$('#owner-picker').contains(event.target)) $('#owner-picker').open = false; });
   document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('#owner-picker').open) { event.preventDefault(); closeOwnerPicker(); return; }
     if (event.key === 'Escape' && !$$('dialog').some(dialog => dialog.open)) closeNavigation();
-    if (event.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && !$$('dialog').some(dialog => dialog.open) && state.connected && state.view !== 'coverage') { event.preventDefault(); $('#repo-search').focus(); }
+    if (event.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && !$$('dialog').some(dialog => dialog.open) && state.connected && state.view !== 'coverage') { event.preventDefault(); $('#owner-picker').open = false; $('#repo-search').focus(); }
     if (event.key === 'Tab' && $('#sidebar').classList.contains('open') && window.matchMedia('(max-width: 700px)').matches) { const focusable = [...$('#sidebar').querySelectorAll('a,button')]; if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); } if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); } }
   });
   $$('dialog').forEach(dialog => {

@@ -30,6 +30,8 @@ Open **[http://127.0.0.1:4317](http://127.0.0.1:4317)**. The first repository sc
 
 There are no npm dependencies to install and no build step. You do not need an `.env` file, a separate token, or a GitHub App installation. The dashboard uses the active `gh` account on the computer running the server.
 
+Use **Review scope** above the summary to select several organizations or owners together. Search the list, check the owners you want, or use **Organizations only** and **All owners**. The summary, alert totals, repository list, and Coverage view use this scope; repository filters further narrow the list. Your selection is remembered locally for the current GitHub account and host. Sidebar owner shortcuts select a single owner, and **Clear all** resets the filters and scope.
+
 ## Try the demo
 
 After cloning the project and entering its directory, run:
