@@ -60,12 +60,13 @@ export function createAppServer({ dashboard, staticDirectory = publicDirectory }
           await dashboard.startScan();
           return send(202, dashboard.snapshot());
         }
-        const match = path.match(/^\/api\/repositories\/([a-zA-Z0-9_-]+)\/enable$/);
+        const match = path.match(/^\/api\/repositories\/([a-zA-Z0-9_-]+)\/(enable|enable-security-updates)$/);
         if (match) {
           const repository = dashboard.snapshot().repositories.find(repo => String(repo.id) === match[1]);
           if (!repository) throw problem(404, 'Repository is not part of this scan.');
-          if (body.confirm !== repository.fullName) throw problem(400, 'Confirm the exact repository before enabling alerts.');
-          await dashboard.enableRepository(match[1]);
+          if (body.confirm !== repository.fullName) throw problem(400, 'Confirm the exact repository before changing settings.');
+          if (match[2] === 'enable-security-updates') await dashboard.enableRepository(match[1], 'security-updates');
+          else await dashboard.enableRepository(match[1]);
           return send(200, dashboard.snapshot());
         }
         throw problem(404, 'Unknown API route.');

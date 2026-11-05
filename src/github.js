@@ -281,4 +281,20 @@ export class GitHubClient {
     if (status !== 204) throw new GitHubError('GitHub did not confirm that Dependabot alerts were enabled.', { status, kind: 'protocol' });
     return { enabled: true };
   }
+
+  async getSecurityUpdates(fullName) {
+    // A 404 can also mean missing token access, so keep it unknown rather than
+    // presenting an inaccessible setting as disabled.
+    const { status, body } = await this.#request(`${repositoryPath(fullName)}/automated-security-fixes`);
+    if (status !== 200 || typeof body?.enabled !== 'boolean' || typeof body?.paused !== 'boolean') {
+      throw new GitHubError('GitHub returned an unreadable security PR setting.', { kind: 'protocol' });
+    }
+    return { enabled: body.enabled, paused: body.paused };
+  }
+
+  async enableSecurityUpdates(fullName) {
+    const { status } = await this.#request(`${repositoryPath(fullName)}/automated-security-fixes`, { method: 'PUT' });
+    if (status !== 204) throw new GitHubError('GitHub did not confirm that Dependabot security PRs were enabled.', { status, kind: 'protocol' });
+    return { enabled: true };
+  }
 }

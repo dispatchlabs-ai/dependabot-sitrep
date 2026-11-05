@@ -43,6 +43,9 @@ export function createDemoSnapshot(clock = () => Date.now()) {
       name, fullName, url: `https://github.com/${fullName}`, language,
       private: owner !== 'alexchen' && name !== 'marketing-site', archived, permission,
       alertsEnabled: enabled, scanState: state || (enabled ? 'complete' : 'disabled'), counts, alerts,
+      securityUpdatesEnabled: permission === 'ADMIN' ? enabled === true && (index % 3 === 0 || index === 10) : null,
+      securityUpdatesPaused: permission === 'ADMIN' ? index === 10 : null,
+      securityUpdatesError: null,
       canEnable: enabled === false && permission === 'ADMIN' && !archived, checkedAt: now,
       error: state === 'unavailable' ? 'Your GitHub CLI identity does not have access to Dependabot alert details for this repository.' : null,
     };

@@ -284,3 +284,24 @@ test('empty enablement requires no gh requests and malformed API payloads fail e
   const malformed = harness([reply({ repositories: [] })]);
   await assert.rejects(malformed.client.listRepositories(), (error) => error.kind === 'protocol');
 });
+
+test('security updates use the dedicated endpoint and preserve paused state', async () => {
+  const { client, calls } = harness([reply({ enabled: true, paused: true }), reply(undefined, { status: 204 })]);
+  assert.deepEqual(await client.getSecurityUpdates('acme/app'), { enabled: true, paused: true });
+  assert.deepEqual(await client.enableSecurityUpdates('acme/app'), { enabled: true });
+  assert.deepEqual(calls.map(endpoint), ['repos/acme/app/automated-security-fixes', 'repos/acme/app/automated-security-fixes']);
+  assert.deepEqual(calls.map(method), ['GET', 'PUT']);
+});
+
+test('security update failures and malformed responses never imply enablement or disablement', async () => {
+  for (const status of [403, 404]) {
+    const { client } = harness([reply({ message: 'Unavailable' }, { status })]);
+    await assert.rejects(client.getSecurityUpdates('acme/app'), error => error.status === status);
+  }
+  for (const body of [{}, { enabled: true }, { enabled: 'false', paused: false }]) {
+    const { client } = harness([reply(body)]);
+    await assert.rejects(client.getSecurityUpdates('acme/app'), error => error.kind === 'protocol');
+  }
+  const { client } = harness([reply({}, { status: 200 })]);
+  await assert.rejects(client.enableSecurityUpdates('acme/app'), error => error.kind === 'protocol');
+});

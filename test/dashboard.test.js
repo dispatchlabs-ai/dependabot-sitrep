@@ -27,6 +27,14 @@ function fakeClient(repositories = [rawRepo(1)]) {
     },
     async listAlerts(fullName) { this.calls.push(`alerts:${fullName}`); return [alert()]; },
     async getRepository(fullName) { this.calls.push(`repository:${fullName}`); return this.repositories.find((row) => row.full_name === fullName); },
+    async getSecurityUpdates(fullName) {
+      const row = this.repositories.find((repo) => repo.full_name === fullName);
+      return { enabled: row.securityUpdatesEnabled ?? false, paused: row.securityUpdatesPaused ?? false };
+    },
+    async enableSecurityUpdates(fullName) {
+      this.writes.push(`security:${fullName}`);
+      this.repositories.find((row) => row.full_name === fullName).securityUpdatesEnabled = true;
+    },
     async enableAlerts(fullName) {
       this.writes.push(fullName);
       this.repositories.find((row) => row.full_name === fullName).enabled = true;
@@ -310,4 +318,88 @@ test('demo fixtures are isolated, cover diverse states, and enable without any G
   const enabled = await dashboard.enableRepository(repo.id);
   assert.equal(enabled.repositories.find((row) => row.id === repo.id).alertsEnabled, true);
   assert.equal(new Dashboard({ demo: true }).snapshot().repositories.find((row) => row.id === repo.id).alertsEnabled, false);
+});
+
+test('security PR enablement verifies its write and preserves alert data', async () => {
+  const client = fakeClient();
+  const dashboard = await scanned(client);
+  const before = dashboard.snapshot().repositories[0];
+  const result = await dashboard.enableRepository('1', 'security-updates');
+  assert.deepEqual(client.writes, ['security:example/repo-1']);
+  assert.equal(result.repositories[0].securityUpdatesEnabled, true);
+  assert.deepEqual(result.repositories[0].counts, before.counts);
+  assert.deepEqual(result.repositories[0].alerts, before.alerts);
+  await dashboard.enableRepository('1', 'security-updates');
+  assert.equal(client.writes.length, 1);
+});
+
+test('security PR action rechecks prerequisites, identity, repository ID, and current permissions', async () => {
+  const changes = [
+    c => { c.repositories[0].enabled = false; },
+    c => { c.repositories[0].enabled = null; },
+    c => { c.repositories[0].archived = true; },
+    c => { c.repositories[0].permissions.admin = false; },
+    c => { c.repositories[0].id = 2; },
+    c => { c.login = 'other'; },
+  ];
+  for (const change of changes) {
+    const client = fakeClient();
+    const dashboard = await scanned(client);
+    change(client);
+    await assert.rejects(dashboard.enableRepository('1', 'security-updates'));
+    assert.deepEqual(client.writes, []);
+  }
+});
+
+test('security PR read failures remain unknown without hiding readable alerts', async () => {
+  const client = fakeClient();
+  client.getSecurityUpdates = async () => { throw err('not_found', 'Setting unavailable', 404); };
+  const dashboard = await scanned(client);
+  const row = dashboard.snapshot().repositories[0];
+  assert.equal(row.securityUpdatesEnabled, null);
+  assert.match(row.securityUpdatesError, /unavailable/);
+  assert.equal(row.counts.total, 1);
+  assert.equal(row.scanState, 'complete');
+  await assert.rejects(dashboard.enableRepository('1', 'security-updates'), /did not confirm/);
+  assert.equal(dashboard.snapshot().repositories[0].securityUpdatesEnabled, null);
+});
+
+test('security PR writes stay unknown on failure and cannot overlap a scan or another write', async () => {
+  const client = fakeClient();
+  const dashboard = await scanned(client);
+  let release;
+  client.enableSecurityUpdates = () => new Promise(resolve => { release = resolve; });
+  const enabling = dashboard.enableRepository('1', 'security-updates');
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(dashboard.startScan(), error => error.kind === 'busy');
+  await assert.rejects(dashboard.enableRepository('1', 'security-updates'), error => error.kind === 'busy');
+  release();
+  await assert.rejects(enabling, /did not confirm/);
+  assert.equal(dashboard.snapshot().repositories[0].securityUpdatesEnabled, false);
+  client.enableSecurityUpdates = async () => { throw err('connection', 'Connection lost', 502); };
+  await assert.rejects(dashboard.enableRepository('1', 'security-updates'), /Connection lost/);
+  assert.equal(dashboard.snapshot().repositories[0].securityUpdatesEnabled, null);
+});
+
+test('security PR scans pause on rate limits, skip non-admin reads, and retain paused status', async () => {
+  const client = fakeClient([rawRepo(1, { permissions: { push: true } }), rawRepo(2)]);
+  const reads = [];
+  client.getSecurityUpdates = async name => { reads.push(name); return { enabled: true, paused: true }; };
+  const dashboard = await scanned(client);
+  assert.deepEqual(reads, ['example/repo-2']);
+  assert.equal(dashboard.snapshot().repositories[0].securityUpdatesEnabled, null);
+  assert.equal(dashboard.snapshot().repositories[1].securityUpdatesPaused, true);
+  client.getSecurityUpdates = async () => { throw err('rate_limit', 'Limit reached', 429); };
+  await dashboard.startScan();
+  await dashboard.waitForScan();
+  assert.equal(dashboard.snapshot().scan.status, 'paused');
+});
+
+test('demo security PR enablement changes only the selected repository locally', async () => {
+  const dashboard = new Dashboard({ demo: true });
+  const before = dashboard.snapshot();
+  const row = before.repositories.find(repo => repo.permission === 'ADMIN' && repo.alertsEnabled && !repo.securityUpdatesEnabled);
+  const result = await dashboard.enableRepository(row.id, 'security-updates');
+  assert.equal(result.repositories.find(repo => repo.id === row.id).securityUpdatesEnabled, true);
+  assert.deepEqual(result.repositories.filter(repo => repo.id !== row.id), before.repositories.filter(repo => repo.id !== row.id));
 });

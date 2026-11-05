@@ -76,13 +76,17 @@ npm start -- --port 4318
 
 Repository visibility depends on the **active gh account and its credentials**, including organization SSO authorization and token restrictions. The dashboard cannot discover access hidden from those credentials. Counts remain partial while scanning or when alert access is unavailable. A new scan uses the active account again; switching accounts clears the previous account's snapshot.
 
-The scan uses batched metadata reads and sequential alert requests. Results and progress stay in memory until the server stops. Refresh explicitly to scan again. Rate limits pause the scan and show when another attempt is allowed.
+The scan uses batched metadata reads, sequential alert requests, and security-update setting reads for repositories where you have administrator access. Results and progress stay in memory until the server stops. Refresh explicitly to scan again. Rate limits pause the scan and show when another attempt is allowed.
 
-## Enabling alerts
+## Enabling alerts and security PRs
 
 The per-repository **Enable alerts** action requires administrator access and an explicit confirmation naming the repository. The server rechecks identity and repository permissions before sending the request, then verifies the resulting setting.
 
-GitHub's enable endpoint turns on **Dependabot alerts and the dependency graph**. It does not configure Dependabot version updates or security-update pull requests. Organization policies or token permissions can still prevent the action even when the account is a repository administrator.
+The **Enable alerts** action turns on **Dependabot alerts and the dependency graph**. Once alerts are enabled, **Enable security PRs** separately enables **Dependabot security updates**, allowing GitHub to open pull requests for vulnerable dependencies when fixes are available. Both actions confirm one repository, recheck identity, archive status and administrator access, and verify the resulting setting. Organization policies or token permissions can still prevent either action.
+
+Security PR status appears in repository rows and details, including when GitHub reports updates are paused. Inaccessible or ambiguous settings (including HTTP 403/404 responses) remain **Unknown**; administrators can still attempt enablement. Paused updates must be reviewed in GitHub. Fine-grained tokens need **Administration: read** to check this setting and **Administration: write** to enable it. See the [security updates API](https://docs.github.com/en/rest/repos/repos#enable-dependabot-security-updates).
+
+Scheduled Dependabot **version updates** require a separate `.github/dependabot.yml` configuration; these actions do not create or modify that file.
 
 Demo mode simulates the change and never modifies GitHub. Scans never change repository settings.
 

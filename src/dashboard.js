@@ -44,6 +44,7 @@ function normalize(raw, host) {
     private: Boolean(raw.private), archived: Boolean(raw.archived),
     permission: permission(raw), alertsEnabled: null, scanState: 'queued',
     counts: null, alerts: [], canEnable: false, checkedAt: null, error: null,
+    securityUpdatesEnabled: null, securityUpdatesPaused: null, securityUpdatesError: null,
   };
 }
 
@@ -209,6 +210,7 @@ export class Dashboard {
         }
         row.checkedAt = this.now();
       }
+      if (row.permission === 'ADMIN') await this.readSecurityUpdates(row);
       this.state.scan.processed++;
     }
     const currentIdentity = await this.readViewer();
@@ -223,7 +225,22 @@ export class Dashboard {
     this.state.scan.completedAt = this.now();
   }
 
-  async enableRepository(id) {
+  async readSecurityUpdates(row) {
+    row.securityUpdatesEnabled = null;
+    row.securityUpdatesPaused = null;
+    row.securityUpdatesError = null;
+    try {
+      const settings = await this.client.getSecurityUpdates(row.fullName);
+      row.securityUpdatesEnabled = settings.enabled;
+      row.securityUpdatesPaused = settings.paused;
+    } catch (error) {
+      row.securityUpdatesError = message(error);
+      if (['rate_limit', 'auth', 'cli_missing'].includes(error?.kind)) throw error;
+    }
+  }
+
+  async enableRepository(id, target = 'alerts') {
+    const securityUpdates = target === 'security-updates';
     if (this.scanPromise || this.enableInFlight) throw failure('Another operation is still running.', 'busy', 409);
     const row = this.state.repositories.find((repo) => repo.id === String(id));
     if (!row) throw failure('Repository was not found in the current scan.', 'validation', 404);
@@ -231,6 +248,14 @@ export class Dashboard {
     this.enableInFlight = true;
     try {
       if (this.demo) {
+        if (securityUpdates) {
+          if (row.permission !== 'ADMIN' || row.archived || row.alertsEnabled !== true) throw failure('Enable alerts on an active repository with administrator access first.', 'permission', 403);
+          row.securityUpdatesEnabled = true;
+          row.securityUpdatesPaused = false;
+          row.securityUpdatesError = null;
+          row.checkedAt = this.now();
+          return this.snapshot();
+        }
         if (!row.canEnable) throw failure('This repository cannot be enabled from this dashboard.', 'permission', 403);
         await new Promise((resolve) => setTimeout(resolve, 150));
         row.alertsEnabled = true;
@@ -242,17 +267,32 @@ export class Dashboard {
       if (viewer.login !== this.state.session.login || viewer.host !== this.state.session.host) {
         this.setViewer(viewer);
         this.state.scan = { status: 'idle', phase: 'idle', startedAt: null, completedAt: null, total: 0, processed: 0, error: null, retryAt: null };
-        throw failure('The GitHub CLI account changed. Scan repositories again before enabling alerts.', 'auth', 409);
+        throw failure('The GitHub CLI account changed. Scan repositories again before changing settings.', 'auth', 409);
       }
       const raw = await this.client.getRepository(row.fullName);
       if (String(raw.id) !== row.id) throw failure('This repository changed since the scan. Refresh repositories first.', 'validation', 409);
       const metadata = this.metadata(await this.client.getEnablement([raw]), raw.id);
       const fresh = normalize(raw, viewer.host);
       applyMetadata(fresh, metadata);
-      Object.assign(row, fresh);
+      if (securityUpdates) {
+        Object.assign(row, { archived: fresh.archived, permission: fresh.permission, alertsEnabled: fresh.alertsEnabled, canEnable: fresh.canEnable });
+      } else Object.assign(row, fresh);
       if (row.archived || row.permission !== 'ADMIN' || raw.permissions?.admin !== true) {
         row.canEnable = false;
-        throw failure(row.archived ? 'Archived repositories cannot be changed.' : 'Repository administrator access is required to enable alerts.', 'permission', 403);
+        throw failure(row.archived ? 'Archived repositories cannot be changed.' : 'Repository administrator access is required to change settings.', 'permission', 403);
+      }
+      if (securityUpdates) {
+        if (row.alertsEnabled !== true) throw failure('Enable Dependabot alerts before enabling security PRs.', 'validation', 409);
+        await this.readSecurityUpdates(row);
+        if (row.securityUpdatesEnabled !== true) {
+          row.securityUpdatesEnabled = null;
+          row.securityUpdatesPaused = null;
+          await this.client.enableSecurityUpdates(row.fullName);
+          await this.readSecurityUpdates(row);
+          if (row.securityUpdatesEnabled !== true) throw failure('GitHub did not confirm that security PRs are enabled. Refresh before trying again.', 'validation', 409);
+        }
+        row.checkedAt = this.now();
+        return this.snapshot();
       }
       if (row.alertsEnabled !== true) {
         // Clear the prior disabled claim before a write whose outcome may become uncertain.
@@ -274,6 +314,7 @@ export class Dashboard {
         row.error = `Alerts are enabled, but alerts could not be loaded: ${message(error)}`;
       }
       row.checkedAt = this.now();
+      await this.readSecurityUpdates(row);
       return this.snapshot();
     } catch (error) {
       row.error = message(error);

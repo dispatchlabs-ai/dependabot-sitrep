@@ -9,7 +9,7 @@ async function fixture(t) {
   const dashboard = {
     snapshot: () => ({ repositories: [{ id: '123', fullName: 'example/api' }], demo: true }),
     startScan: async () => calls.push('scan'),
-    enableRepository: async id => calls.push(`enable:${id}`)
+    enableRepository: async (id, target = 'alerts') => calls.push(target === 'alerts' ? `enable:${id}` : `security:${id}`)
   };
   const server = createAppServer({ dashboard });
   server.listen(0, '127.0.0.1');
@@ -58,4 +58,16 @@ test('scan returns accepted, static assets have security headers, and source fil
   assert.match(health.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal((await fetch(`${origin}/%2e%2e%2fpackage.json`)).status, 404);
   assert.equal((await fetch(`${origin}/server.js`)).status, 404);
+});
+
+test('security PR enablement requires the same origin, token, and exact repository confirmation', async t => {
+  const { origin, calls, token } = await fixture(t);
+  const url = `${origin}/api/repositories/123/enable-security-updates`;
+  const headers = { Origin: origin, 'content-type': 'application/json', 'x-sitrep-token': token };
+  assert.equal((await fetch(url, { method: 'POST', headers: { ...headers, Origin: 'https://example.com' }, body: '{}' })).status, 403);
+  assert.equal((await fetch(url, { method: 'POST', headers: { ...headers, 'x-sitrep-token': '' }, body: '{}' })).status, 403);
+  assert.equal((await fetch(url, { method: 'POST', headers, body: JSON.stringify({ confirm: 'example/other' }) })).status, 400);
+  assert.deepEqual(calls, []);
+  assert.equal((await fetch(url, { method: 'POST', headers, body: JSON.stringify({ confirm: 'example/api' }) })).status, 200);
+  assert.deepEqual(calls, ['security:123']);
 });
